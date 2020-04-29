@@ -25,7 +25,7 @@ from cryptography.hazmat.primitives.ciphers.algorithms import AES
 from cryptography.hazmat.primitives.ciphers.modes import CBC
 from cryptography.hazmat.primitives.hashes import SHA1
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-
+import secretstorage
 
 def clean(decrypted: bytes) -> str:
     r"""Strip padding from decrypted value.
@@ -109,6 +109,8 @@ def get_linux_config(browser: str) -> dict:
         Config dictionary for Chrome/Chromium cookie decryption
 
     """
+    bus = secretstorage.dbus_init()
+    collection = secretstorage.get_any_collection(bus)  ## login keyring
     # Verify supported browser, fail early otherwise
     if browser.lower() == "chrome":
         cookie_file = "~/.config/google-chrome/Default/Cookies"
@@ -118,58 +120,16 @@ def get_linux_config(browser: str) -> dict:
         raise ValueError("Browser must be either Chrome or Chromium.")
 
     # Set the default linux password
-    config = {
-        "my_pass": "peanuts",
-        "iterations": 1,
-        "cookie_file": cookie_file,
-    }
-
-    # Try to get pass from Gnome / libsecret if it seems available
-    # https://github.com/n8henrie/pycookiecheat/issues/12
-    pass_found = False
-    try:
-        import gi
-
-        gi.require_version("Secret", "1")
-        from gi.repository import Secret
-    except ImportError:
-        pass
+    config = {"my_pass": "peanuts", "iterations": 1, "cookie_file": cookie_file}
+    if not collection.is_locked():
+        label_to_check = f"{browser.capitalize()} Safe Storage"
+        items1 = collection.get_all_items()
+        for item in items1:
+            if item.get_label() == label_to_check:
+                config["my_pass"] = item.get_secret()
     else:
-        flags = Secret.ServiceFlags.LOAD_COLLECTIONS
-        service = Secret.Service.get_sync(flags)
-
-        gnome_keyring = service.get_collections()
-        unlocked_keyrings = service.unlock_sync(gnome_keyring).unlocked
-
-        keyring_name = "{} Safe Storage".format(browser.capitalize())
-
-        for unlocked_keyring in unlocked_keyrings:
-            for item in unlocked_keyring.get_items():
-                if item.get_label() == keyring_name:
-                    item.load_secret_sync()
-                    config["my_pass"] = item.get_secret().get_text()
-                    pass_found = True
-                    break
-            else:
-                # Inner loop didn't `break`, keep looking
-                continue
-
-            # Inner loop did `break`, so `break` outer loop
-            break
-
-    # Try to get pass from keyring, which should support KDE / KWallet
-    # if dbus-python is installed.
-    if not pass_found:
-        try:
-            my_pass = keyring.get_password(
-                "{} Keys".format(browser), "{} Safe Storage".format(browser)
-            )
-        except RuntimeError:
-            pass
-        else:
-            if my_pass:
-                config["my_pass"] = my_pass
-
+        print("keyring is locked")
+        exit(1)
     return config
 
 
