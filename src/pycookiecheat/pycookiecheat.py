@@ -41,6 +41,7 @@ def clean(decrypted: bytes) -> str:
     """
     last = decrypted[-1]
     if isinstance(last, int):
+        print(decrypted)
         return decrypted[:-last].decode("utf8")
     return decrypted[: -ord(last)].decode("utf8")
 
